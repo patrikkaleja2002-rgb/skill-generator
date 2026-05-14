@@ -307,7 +307,10 @@ export async function POST(_req: NextRequest) {
   }
 
   const genAI = new GoogleGenerativeAI(apiKey);
-  const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+  const model = genAI.getGenerativeModel({
+    model: "gemini-1.5-flash",
+    generationConfig: { temperature: 1.5, topP: 0.95 },
+  });
   const encoder = new TextEncoder();
 
   const readable = new ReadableStream({
