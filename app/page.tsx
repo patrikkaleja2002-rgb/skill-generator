@@ -5,9 +5,13 @@ import { useState, useRef } from "react";
 type Skill = { raw: string; name: string; tagline: string };
 
 const CATEGORIES = [
-  { label: "Web & UI", icon: "◈", color: "from-blue-500/20 to-cyan-500/10 border-blue-500/20 text-blue-300" },
-  { label: "Grafika", icon: "◉", color: "from-purple-500/20 to-pink-500/10 border-purple-500/20 text-purple-300" },
-  { label: "Automatizace", icon: "◎", color: "from-emerald-500/20 to-green-500/10 border-emerald-500/20 text-emerald-300" },
+  { label: "Frontend", icon: "◈", color: "from-blue-500/20 to-cyan-500/10 border-blue-500/20 text-blue-300" },
+  { label: "Backend", icon: "◉", color: "from-violet-500/20 to-purple-500/10 border-violet-500/20 text-violet-300" },
+  { label: "AI & ML", icon: "◎", color: "from-pink-500/20 to-rose-500/10 border-pink-500/20 text-pink-300" },
+  { label: "DevOps", icon: "◆", color: "from-orange-500/20 to-amber-500/10 border-orange-500/20 text-orange-300" },
+  { label: "Mobile", icon: "◇", color: "from-emerald-500/20 to-green-500/10 border-emerald-500/20 text-emerald-300" },
+  { label: "Security", icon: "◐", color: "from-red-500/20 to-rose-500/10 border-red-500/20 text-red-300" },
+  { label: "Tools", icon: "◑", color: "from-zinc-500/20 to-slate-500/10 border-zinc-500/20 text-zinc-300" },
 ];
 
 function parseSkills(text: string): Skill[] {
@@ -209,7 +213,7 @@ export default function Home() {
               Skill <span className="gradient-text">Generator</span>
             </h1>
             <p className="text-zinc-400 text-lg max-w-md mx-auto leading-relaxed">
-              Nejlepší Claude Code skilly pro web, grafiku&nbsp;a&nbsp;automatizaci — vygenerované AI.
+              Praktické Claude Code skilly pro každou oblast vývoje — vygenerované AI.
             </p>
             <div className="flex items-center justify-center gap-2 flex-wrap pt-1">
               {CATEGORIES.map((c) => (
