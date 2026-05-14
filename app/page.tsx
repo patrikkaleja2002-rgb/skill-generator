@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useCallback, memo } from "react";
 
 type Skill = { raw: string; name: string; tagline: string };
 
@@ -30,34 +30,36 @@ function parseSkills(text: string): Skill[] {
     });
 }
 
-function SkillCard({ skill, index, copied, onCopy }: {
+const SkillCard = memo(function SkillCard({ skill, index, copied, onCopy }: {
   skill: Skill;
   index: number;
   copied: string | null;
   onCopy: (raw: string, name: string) => void;
 }) {
   const cardRef = useRef<HTMLDivElement>(null);
+  const rafRef = useRef<number>(0);
 
   function handleMouseMove(e: React.MouseEvent<HTMLDivElement>) {
-    const card = cardRef.current;
-    if (!card) return;
-    const rect = card.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-    const cx = rect.width / 2;
-    const cy = rect.height / 2;
-    const rotateX = ((y - cy) / cy) * -8;
-    const rotateY = ((x - cx) / cx) * 8;
-    card.style.transform = `perspective(800px) rotateX(${rotateX}deg) rotateY(${rotateY}deg) translateZ(8px)`;
+    cancelAnimationFrame(rafRef.current);
+    const clientX = e.clientX;
+    const clientY = e.clientY;
+    rafRef.current = requestAnimationFrame(() => {
+      const card = cardRef.current;
+      if (!card) return;
+      const rect = card.getBoundingClientRect();
+      const rotateX = (((clientY - rect.top) / rect.height) - 0.5) * -16;
+      const rotateY = (((clientX - rect.left) / rect.width) - 0.5) * 16;
+      card.style.transform = `perspective(800px) rotateX(${rotateX}deg) rotateY(${rotateY}deg) translateZ(8px)`;
+    });
   }
 
   function handleMouseLeave() {
+    cancelAnimationFrame(rafRef.current);
     const card = cardRef.current;
-    if (!card) return;
-    card.style.transform = "perspective(800px) rotateX(0deg) rotateY(0deg) translateZ(0px)";
+    if (card) card.style.transform = "";
   }
 
-  const cat = CATEGORIES[index % 3];
+  const cat = CATEGORIES[index % CATEGORIES.length];
   const isCopied = copied === skill.name;
 
   return (
@@ -93,7 +95,7 @@ function SkillCard({ skill, index, copied, onCopy }: {
       </pre>
     </div>
   );
-}
+});
 
 function GlowButton({ onClick, disabled, children }: {
   onClick: () => void;
@@ -121,78 +123,142 @@ export default function Home() {
   const [skills, setSkills] = useState<Skill[]>([]);
   const [genStreaming, setGenStreaming] = useState("");
   const [genLoading, setGenLoading] = useState(false);
+  const [genError, setGenError] = useState<string | null>(null);
   const [genCopied, setGenCopied] = useState<string | null>(null);
 
   const [inputSkill, setInputSkill] = useState("");
   const [improved, setImproved] = useState("");
   const [improveStreaming, setImproveStreaming] = useState("");
   const [improveLoading, setImproveLoading] = useState(false);
+  const [improveError, setImproveError] = useState<string | null>(null);
   const [improveCopied, setImproveCopied] = useState(false);
 
-  async function generate() {
+  // Refs to avoid re-renders during streaming
+  const genAbortRef = useRef<AbortController | null>(null);
+  const genBufferRef = useRef("");
+  const genTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const improveAbortRef = useRef<AbortController | null>(null);
+  const improveBufferRef = useRef("");
+  const improveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const flushGenStream = useCallback(() => {
+    setGenStreaming(genBufferRef.current);
+    genTimerRef.current = null;
+  }, []);
+
+  const flushImproveStream = useCallback(() => {
+    setImproveStreaming(improveBufferRef.current);
+    improveTimerRef.current = null;
+  }, []);
+
+  const generate = useCallback(async () => {
+    genAbortRef.current?.abort();
+    genAbortRef.current = new AbortController();
+
     setGenLoading(true);
     setSkills([]);
     setGenStreaming("");
+    setGenError(null);
     setGenCopied(null);
+    genBufferRef.current = "";
+
     try {
-      const res = await fetch("/api/generate-skill", { method: "POST" });
-      if (!res.ok) return;
-      const reader = res.body!.getReader();
+      const res = await fetch("/api/generate-skill", {
+        method: "POST",
+        signal: genAbortRef.current.signal,
+      });
+      if (!res.ok || !res.body) throw new Error(`Chyba API: ${res.status}`);
+
+      const reader = res.body.getReader();
       const decoder = new TextDecoder();
-      let full = "";
+
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
-        full += decoder.decode(value, { stream: true });
-        setGenStreaming(full);
+        genBufferRef.current += decoder.decode(value, { stream: true });
+        // Throttle UI update to max ~12fps — prevents re-render flood
+        if (!genTimerRef.current) {
+          genTimerRef.current = setTimeout(flushGenStream, 80);
+        }
       }
+
+      if (genTimerRef.current) {
+        clearTimeout(genTimerRef.current);
+        genTimerRef.current = null;
+      }
+      const full = genBufferRef.current;
       setSkills(parseSkills(full));
       setGenStreaming("");
+    } catch (err) {
+      if ((err as Error).name !== "AbortError") {
+        setGenError((err as Error).message ?? "Něco se pokazilo, zkus to znovu.");
+      }
     } finally {
       setGenLoading(false);
     }
-  }
+  }, [flushGenStream]);
 
-  async function improve() {
+  const improve = useCallback(async () => {
     if (!inputSkill.trim()) return;
+
+    improveAbortRef.current?.abort();
+    improveAbortRef.current = new AbortController();
+
     setImproveLoading(true);
     setImproved("");
     setImproveStreaming("");
+    setImproveError(null);
     setImproveCopied(false);
+    improveBufferRef.current = "";
+
     try {
       const res = await fetch("/api/improve-skill", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ skill: inputSkill }),
+        signal: improveAbortRef.current.signal,
       });
-      if (!res.ok) return;
-      const reader = res.body!.getReader();
+      if (!res.ok || !res.body) throw new Error(`Chyba API: ${res.status}`);
+
+      const reader = res.body.getReader();
       const decoder = new TextDecoder();
-      let full = "";
+
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
-        full += decoder.decode(value, { stream: true });
-        setImproveStreaming(full);
+        improveBufferRef.current += decoder.decode(value, { stream: true });
+        if (!improveTimerRef.current) {
+          improveTimerRef.current = setTimeout(flushImproveStream, 80);
+        }
       }
-      setImproved(full);
+
+      if (improveTimerRef.current) {
+        clearTimeout(improveTimerRef.current);
+        improveTimerRef.current = null;
+      }
+      setImproved(improveBufferRef.current);
       setImproveStreaming("");
+    } catch (err) {
+      if ((err as Error).name !== "AbortError") {
+        setImproveError((err as Error).message ?? "Něco se pokazilo, zkus to znovu.");
+      }
     } finally {
       setImproveLoading(false);
     }
-  }
+  }, [inputSkill, flushImproveStream]);
 
-  async function copySkill(text: string, name: string) {
+  const copySkill = useCallback(async (text: string, name: string) => {
     await navigator.clipboard.writeText(text);
     setGenCopied(name);
     setTimeout(() => setGenCopied(null), 2000);
-  }
+  }, []);
 
-  async function copyImproved() {
+  const copyImproved = useCallback(async () => {
     await navigator.clipboard.writeText(improved);
     setImproveCopied(true);
     setTimeout(() => setImproveCopied(false), 2000);
-  }
+  }, [improved]);
 
   return (
     <div className="relative min-h-screen bg-[#080810] overflow-hidden">
@@ -237,6 +303,13 @@ export default function Home() {
               </GlowButton>
             </div>
 
+            {genError && (
+              <div className="glass rounded-2xl p-4 border border-red-500/20 bg-red-500/5">
+                <p className="text-red-400 text-sm text-center">{genError}</p>
+                <p className="text-zinc-600 text-xs text-center mt-1">Zkus to znovu kliknutím na tlačítko</p>
+              </div>
+            )}
+
             {genLoading && genStreaming && (
               <div className="glass rounded-2xl p-4 border border-white/5">
                 <div className="flex items-center gap-2 mb-3">
@@ -259,7 +332,7 @@ export default function Home() {
                 </div>
                 <div className="space-y-3">
                   {skills.map((skill, i) => (
-                    <SkillCard key={i} skill={skill} index={i} copied={genCopied} onCopy={copySkill} />
+                    <SkillCard key={skill.name} skill={skill} index={i} copied={genCopied} onCopy={copySkill} />
                   ))}
                 </div>
                 <p className="text-center text-xs text-zinc-600 pt-2">
@@ -302,6 +375,12 @@ export default function Home() {
                 ) : "⚡ Vylepšit skill"}
               </GlowButton>
             </div>
+
+            {improveError && (
+              <div className="glass rounded-2xl p-4 border border-red-500/20 bg-red-500/5">
+                <p className="text-red-400 text-sm text-center">{improveError}</p>
+              </div>
+            )}
 
             {improveLoading && improveStreaming && (
               <div className="glass rounded-2xl p-4 border border-white/5">
