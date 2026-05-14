@@ -39,7 +39,7 @@ description: Precise one-line description
 Output ONLY the improved skill file. No explanations, no "here is the improved version" — just the raw skill content.`;
 
   const genAI = new GoogleGenerativeAI(apiKey);
-  const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+  const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
   const encoder = new TextEncoder();
 
   const readable = new ReadableStream({
